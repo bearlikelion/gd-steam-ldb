@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # plugin.cfg is the version the editor shows, so a mismatched tag ships wrong.
+      - name: Check plugin.cfg matches the tag
+        run: |
+          cfg_version="$(sed -n 's/^version="\(.*\)"$/\1/p' addons/gd_steam_ldb/plugin.cfg)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${tag_version%%-*}"
+          if [ "$cfg_version" != "$tag_version" ]; then
+            echo "plugin.cfg says '$cfg_version', tag says '$tag_version'" >&2
+            exit 1
+          fi
+
+      # export-ignore means asset store downloads get only addons/, so the
+      # license and readme have to ride inside it.
+      - name: Package addon
+        run: |
+          mkdir -p dist
+          cp LICENSE README.md addons/gd_steam_ldb/
+          zip -r "dist/gd-steam-ldb-${GITHUB_REF_NAME}.zip" addons/gd_steam_ldb
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/gd-steam-ldb-*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
