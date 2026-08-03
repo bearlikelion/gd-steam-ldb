@@ -5,8 +5,6 @@ extends Node
 ## Boards are created on demand from a naming rule, so a new level or category
 ## needs no Steamworks dashboard work. See README.md.
 ##
-## Add as an autoload named "SteamLeaderboard", then call [method configure].
-##
 ## gd-steam-ldb, MIT licensed. Extracted from SurfsUp:
 ## https://store.steampowered.com/app/3454830/SurfsUp/
 
@@ -52,6 +50,8 @@ var _request: Dictionary = {}
 var _timer: Timer = null
 
 
+#region Setup
+
 func _ready() -> void:
 	_timer = Timer.new()
 	_timer.one_shot = true
@@ -95,9 +95,62 @@ func _listen(source: Signal, target: Callable) -> void:
 		source.connect(target)
 
 
-# ---------------------------------------------------------------------------
-# Naming
-# ---------------------------------------------------------------------------
+## Config problems, empty when valid. A duplicate token silently misparses
+## names rather than erroring, so call this in development.
+func validate() -> PackedStringArray:
+	var problems: PackedStringArray = PackedStringArray()
+	if String(_config.get("prefix", "")).is_empty():
+		problems.append("prefix is empty, boards would collide with other games")
+
+	var owners: Dictionary[String, String] = {}
+	for axis: Dictionary in _axes:
+		var id: String = axis.get("id", "")
+		if id.is_empty():
+			problems.append("an axis has no id")
+			continue
+
+		var tokens: Dictionary = axis.get("tokens", {})
+		for value: int in tokens:
+			var token: String = tokens[value]
+			if token.is_empty():
+				problems.append("%s: value %d has an empty token" % [id, value])
+			elif token.contains("_"):
+				problems.append("%s: token '%s' contains '_'" % [id, token])
+			elif owners.has(token):
+				problems.append("token '%s' used by both '%s' and '%s'"
+					% [token, owners[token], id])
+			owners[token] = id
+
+		var default_value: int = axis.get("default", 0)
+		var always: bool = axis.get("always_token", false)
+		if always and not tokens.has(default_value):
+			problems.append("%s: always_token needs a token for default %d"
+				% [id, default_value])
+		elif not always and tokens.has(default_value):
+			problems.append("%s: default %d must not have a token unless always_token"
+				% [id, default_value])
+	return problems
+
+
+## Clears per-level state. [method set_group] calls this for you.
+func reset() -> void:
+	handle = 0
+	entry_count = 1
+	_handles.clear()
+	_finds.clear()
+	_finding = false
+	_pending.clear()
+	_uploads.clear()
+	_shares.clear()
+	_requests.clear()
+	_request = {}
+	_timer.stop()
+	view = variant.duplicate()
+
+#endregion
+
+
+#region Naming
 
 ## Builds PREFIX_TOKEN_TOKEN_group.
 ##
@@ -183,47 +236,10 @@ func boards_per_group() -> int:
 		total *= values.size()
 	return total
 
-
-## Config problems, empty when valid. A duplicate token silently misparses
-## names rather than erroring, so call this in development.
-func validate() -> PackedStringArray:
-	var problems: PackedStringArray = PackedStringArray()
-	if String(_config.get("prefix", "")).is_empty():
-		problems.append("prefix is empty, boards would collide with other games")
-
-	var owners: Dictionary[String, String] = {}
-	for axis: Dictionary in _axes:
-		var id: String = axis.get("id", "")
-		if id.is_empty():
-			problems.append("an axis has no id")
-			continue
-
-		var tokens: Dictionary = axis.get("tokens", {})
-		for value: int in tokens:
-			var token: String = tokens[value]
-			if token.is_empty():
-				problems.append("%s: value %d has an empty token" % [id, value])
-			elif token.contains("_"):
-				problems.append("%s: token '%s' contains '_'" % [id, token])
-			elif owners.has(token):
-				problems.append("token '%s' used by both '%s' and '%s'"
-					% [token, owners[token], id])
-			owners[token] = id
-
-		var default_value: int = axis.get("default", 0)
-		var always: bool = axis.get("always_token", false)
-		if always and not tokens.has(default_value):
-			problems.append("%s: always_token needs a token for default %d"
-				% [id, default_value])
-		elif not always and tokens.has(default_value):
-			problems.append("%s: default %d must not have a token unless always_token"
-				% [id, default_value])
-	return problems
+#endregion
 
 
-# ---------------------------------------------------------------------------
-# Selection
-# ---------------------------------------------------------------------------
+#region Selection
 
 ## Point at a level. Clears the previous level's state, then resolves this
 ## one's board so the handle is ready before the run ends.
@@ -268,10 +284,10 @@ func _activate() -> void:
 	handle = 0
 	_find(group, view, true)
 
+#endregion
 
-# ---------------------------------------------------------------------------
-# Board resolution
-# ---------------------------------------------------------------------------
+
+#region Board resolution
 
 # Finds are serialized: Steam's callback does not say which board it answers,
 # so two in flight would be indistinguishable.
@@ -326,10 +342,10 @@ func _on_found(board_handle: int, result: int) -> void:
 	_next_find()
 	_next_request()
 
+#endregion
 
-# ---------------------------------------------------------------------------
-# Submitting
-# ---------------------------------------------------------------------------
+
+#region Submitting
 
 ## Send a score, queueing it when the board is not resolved yet.
 ##
@@ -405,10 +421,10 @@ func _on_uploaded(success: int, board_handle: int, _score: Dictionary) -> void:
 			break
 	score_submitted.emit(success == 1, context)
 
+#endregion
 
-# ---------------------------------------------------------------------------
-# Extra info
-# ---------------------------------------------------------------------------
+
+#region Extra info
 
 ## Packs a dictionary into the int array Steam stores on an entry.
 ##
@@ -438,10 +454,10 @@ func decode_extra(details: PackedInt32Array) -> Dictionary:
 		out[keys[i]] = details[i] if i < details.size() else 0
 	return out
 
+#endregion
 
-# ---------------------------------------------------------------------------
-# Fetching
-# ---------------------------------------------------------------------------
+
+#region Fetching
 
 ## Read entries. [param callback] takes an Array and always fires, with an
 ## empty array on failure or timeout.
@@ -523,10 +539,10 @@ func rank_label(rank: int) -> String:
 			return ranks[threshold]
 	return ranks[thresholds[thresholds.size() - 1]]
 
+#endregion
 
-# ---------------------------------------------------------------------------
-# Replays (UGC)
-# ---------------------------------------------------------------------------
+
+#region Replays (UGC)
 
 ## Attach a replay to the player's entry: cloud write, share, attach.
 ##
@@ -594,20 +610,4 @@ func download_replay(ugc_handle: int, callback: Callable) -> void:
 	Steam.download_ugc_result.connect(on_done, CONNECT_ONE_SHOT)
 	Steam.ugcDownload(ugc_handle, 0)
 
-
-# ---------------------------------------------------------------------------
-
-## Clears per-level state. [method set_group] calls this for you.
-func reset() -> void:
-	handle = 0
-	entry_count = 1
-	_handles.clear()
-	_finds.clear()
-	_finding = false
-	_pending.clear()
-	_uploads.clear()
-	_shares.clear()
-	_requests.clear()
-	_request = {}
-	_timer.stop()
-	view = variant.duplicate()
+#endregion

@@ -11,10 +11,14 @@ Needs [GodotSteam](https://godotsteam.com). MIT licensed.
 
 ## Install
 
-1. Copy `steam_leaderboard.gd` into your project.
-2. Open **Project > Project Settings > Globals** and add it as
-   `SteamLeaderboard`.
+1. Copy `addons/gd_steam_ldb/` into your project's `addons/` folder.
+2. Enable **gd-steam-ldb** in **Project > Project Settings > Plugins**. That
+   registers the `SteamLeaderboard` autoload for you.
 3. Call `configure()` once, after `Steam.steamInit()`.
+
+Prefer no plugin? Copy `steam_leaderboard.gd` anywhere in your project and add
+it as an autoload named `SteamLeaderboard` yourself. The script has no
+dependency on the plugin.
 
 ## Your first board
 
